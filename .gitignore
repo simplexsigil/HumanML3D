@@ -1,0 +1,45 @@
+# Python cache files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Data directories
+HumanML3D/new_joint_comp_vecs/
+HumanML3D/new_joint_comp_vecs_flat/
+HumanML3D/new_joints_comp/
+HumanML3D/texts/
+HumanML3D/train_int/
+MIAHML3D/
+amass_data/
+body_models/
+frames/
+joints/
+joints_comp/
+pose_data/
+
+# Generated data files
+HumanML3D/*.csv
+HumanML3D/train.txt.all
+*.npy
+*.mp4
+
+# Compiled Python files
+*.py[co]
+
+# Temporary files
+*.tmp*
+
+# Modified data files you might want to exclude
+# Uncomment if you don't want to track changes to these files
+# HumanML3D/Mean.npy
+# HumanML3D/Std.npy
+# HumanML3D/test.txt
+# HumanML3D/train.txt
+# HumanML3D/val.txt
