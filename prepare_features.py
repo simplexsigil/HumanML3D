@@ -71,6 +71,13 @@ def parse_arguments():
     )
     
     parser.add_argument(
+        "--body_models_dir",
+        type=str,
+        default="./body_models",
+        help="Directory containing SMPL-H body models (required for AMASS processing)"
+    )
+    
+    parser.add_argument(
         "--device",
         type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
@@ -109,7 +116,8 @@ def process_and_generate_features(args):
             args.dataset,
             args.intermediate_dir if args.save_intermediate else None,
             args.save_intermediate,
-            args.device
+            args.device,
+            body_models_dir=args.body_models_dir  # Pass the body_models_dir parameter
         )
     else:
         raise ValueError(f"Unsupported data type: {args.data_type}. Use 'mia' or 'amass'.")

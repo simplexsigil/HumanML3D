@@ -112,7 +112,7 @@ def get_amass_paths(dataset_dir):
     return group_path, dataset_names
 
 
-def process_amass_dataset(dataset_dir, dataset_name=None, output_dir=None, save_intermediate=False, device=None):
+def process_amass_dataset(dataset_dir, dataset_name=None, output_dir=None, save_intermediate=False, device=None, body_models_dir="./body_models"):
     """Process AMASS dataset and return joint positions
     
     Args:
@@ -121,12 +121,13 @@ def process_amass_dataset(dataset_dir, dataset_name=None, output_dir=None, save_
         output_dir: Directory to save processed data (if save_intermediate is True)
         save_intermediate: Whether to save intermediate results to disk
         device: Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)
+        body_models_dir: Directory containing SMPL-H body models
     
     Returns:
         Dictionary mapping sample paths to joint position arrays
     """
     # Initialize body models
-    male_bm, female_bm = initialize_body_models(device=device)
+    male_bm, female_bm = initialize_body_models(body_models_dir=body_models_dir, device=device)
     
     # Get paths for datasets
     group_path, dataset_names = get_amass_paths(dataset_dir)
@@ -184,8 +185,11 @@ if __name__ == "__main__":
     parser.add_argument("--input_dir", type=str, required=True, help="Directory containing AMASS data")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save processed data")
     parser.add_argument("--dataset", type=str, help="Specific dataset to process")
+    parser.add_argument("--body_models_dir", type=str, default="./body_models", 
+                        help="Directory containing SMPL-H body models")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
                         help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)")
     args = parser.parse_args()
     
-    process_amass_dataset(args.input_dir, args.dataset, args.output_dir, save_intermediate=True, device=args.device)
+    process_amass_dataset(args.input_dir, args.dataset, args.output_dir, save_intermediate=True, 
+                          device=args.device, body_models_dir=args.body_models_dir)
