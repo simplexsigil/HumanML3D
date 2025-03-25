@@ -528,7 +528,7 @@ r_hip, l_hip = 2, 1  # Hip indices for facing direction calculation
 joints_num = 22  # Total number of joints in the skeleton
 # ds_num = 8
 
-
+'''
 dataset = "MIA"
 
 if dataset == "AMASS":
@@ -600,7 +600,7 @@ for source_file in tqdm(source_list):  # Process each source file
 #         break
 
 print("Total clips: %d, Frames: %d, Duration: %fm" % (len(source_list), frame_num, frame_num / 20 / 60))
-
+'''
 
 def process_motion_data(joint_data, device=None):
     """
