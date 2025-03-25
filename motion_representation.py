@@ -1,26 +1,18 @@
+import os
+import numpy as np
+from tqdm import tqdm
+import torch
+
 from os.path import join as pjoin
 
 from common.skeleton import Skeleton
-import numpy as np
-import os
 from common.quaternion import *
 from paramUtil import *
-
-import torch
-from tqdm import tqdm
-import os
-
 
 import matplotlib
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation, PillowWriter
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-import mpl_toolkits.mplot3d.axes3d as p3
-
-
-import matplotlib.pyplot as plt
-import numpy as np
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import mpl_toolkits.mplot3d.axes3d as p3
 
@@ -154,7 +146,7 @@ def uniform_skeleton(positions, target_offset):
 
 
 # Define a function to process each file, adjusting positions and orientations
-def process_file(positions, feet_thre):
+def process_file(positions, feet_thre, device=None):
     """
     Processes a file of joint positions to align the motion with a target skeleton, set the animation
     to start at the origin with the character facing forward, and detect foot contacts based on
@@ -166,6 +158,7 @@ def process_file(positions, feet_thre):
     Parameters:
     - positions (numpy.ndarray): The joint positions across all frames.
     - feet_thre (float): Threshold below which velocity indicates a foot contact.
+    - device (str or torch.device): Device to run computations on.
 
     Returns:
     - data (numpy.ndarray): The processed motion data including joint positions, rotations, velocities, and foot contacts.
@@ -173,6 +166,10 @@ def process_file(positions, feet_thre):
     - positions (numpy.ndarray): Transformed joint positions for each frame.
     - l_velocity (numpy.ndarray): Linear velocities of the root joint.
     """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    elif isinstance(device, str):
+        device = torch.device(device)
 
     # plot_3d_motion("./positions_non_uniform.mp4", kinematic_chain, positions, "title", fps=20)
 
@@ -608,3 +605,81 @@ for source_file in tqdm(source_list):  # Process each source file
 #         break
 
 print("Total clips: %d, Frames: %d, Duration: %fm" % (len(source_list), frame_num, frame_num / 20 / 60))
+
+
+def process_motion_data(joint_data, device=None):
+    """
+    Process motion data to generate motion features
+    
+    Args:
+        joint_data: Dictionary of joint positions
+        device: Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)
+        
+    Returns:
+        Dictionary of motion features
+    """
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    elif isinstance(device, str):
+        device = torch.device(device)
+    
+    # Implement motion processing logic using existing code
+    # This would convert joint positions to the motion representation
+    # used by HumanML3D
+    
+    # Placeholder implementation - replace with actual code
+    features = {}
+    for key, positions in tqdm(joint_data.items(), desc="Processing motions"):
+        try:
+            positions_np = positions[:, :joints_num]
+            data, _, _, _ = process_file(positions_np, 0.002, device)
+            features[key] = data
+        except Exception as e:
+            print(f"Error processing {key}: {e}")
+    
+    return features
+
+
+def process_from_files(joint_files_dir, device=None):
+    """
+    Process motion data from files
+    
+    Args:
+        joint_files_dir: Directory containing joint position files
+        device: Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)
+        
+    Returns:
+        Dictionary of motion features
+    """
+    joint_data = {}
+    
+    # Load joint data from files
+    for root, _, files in os.walk(joint_files_dir):
+        for file in files:
+            if file.endswith('.npy'):
+                path = os.path.join(root, file)
+                joint_data[path] = np.load(path)
+    
+    return process_motion_data(joint_data, device)
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Process motion data into features")
+    parser.add_argument("--input_dir", type=str, required=True, help="Directory containing joint position files")
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save processed features")
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
+                        help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)")
+    args = parser.parse_args()
+    
+    features = process_from_files(args.input_dir, args.device)
+    
+    # Save features to output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    for key, feature in features.items():
+        save_path = os.path.join(
+            args.output_dir, 
+            os.path.relpath(key, args.input_dir)
+        )
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        np.save(save_path, feature)
