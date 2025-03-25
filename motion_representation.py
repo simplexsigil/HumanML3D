@@ -514,11 +514,6 @@ def recover_from_ric(data, joints_num):
     return positions  # Return positions
 
 
-# The given data is used to double check if you are on the right track.
-reference1 = np.load("./HumanML3D/new_joints_comp/TotalCapture/s3/walking1_poses.npy")
-reference2 = np.load("./HumanML3D/new_joint_comp_vecs/TotalCapture/s3/walking1_poses.npy")
-
-
 """
 Data Generation
 """
