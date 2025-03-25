@@ -40,9 +40,8 @@ def initialize_body_models(body_models_dir="./body_models", device=None):
     return male_bm, female_bm
 
 
-def amass_to_pose(src_path, male_bm, female_bm):
+def amass_to_pose(src_path, male_bm, female_bm, device):
     """Convert AMASS motion data to joint positions"""
-    device = male_bm.trans.device  # Get device from body model
     
     bdata = np.load(src_path, allow_pickle=True)
     fps = 0
@@ -161,7 +160,7 @@ def process_amass_dataset(dataset_dir, dataset_name=None, output_dir=None, save_
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
             
             # Process the pose data
-            pose_data, current_fps = amass_to_pose(path, male_bm, female_bm)
+            pose_data, current_fps = amass_to_pose(path, male_bm, female_bm, device)
             fps = current_fps  # Update fps
             
             if pose_data is not None:
