@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 # Define a kinematic tree for the skeletal struture
 kit_kinematic_chain = [[0, 11, 12, 13, 14, 15], [0, 16, 17, 18, 19, 20], [0, 1, 2, 3, 4], [3, 5, 6, 7], [3, 8, 9, 10]]
@@ -61,3 +62,12 @@ kit_tgt_skel_id = '03950'
 
 t2m_tgt_skel_id = '000021'
 
+# Lower legs
+l_idx1, l_idx2 = 5, 8  # Lower leg indices for scaling calculation
+# Right/Left foot
+fid_r, fid_l = [8, 11], [7, 10]  # Indices for right and left feet
+# Face direction, r_hip, l_hip, sdr_r, sdr_l
+face_joint_indx = [2, 1, 17, 16]  # Indices for calculating facing direction
+# l_hip, r_hip
+r_hip, l_hip = 2, 1  # Hip indices for facing direction calculation
+joints_num = 22  # Total number of joints in the skeleton

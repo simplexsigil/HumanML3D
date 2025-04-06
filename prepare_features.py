@@ -4,11 +4,18 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 import torch
+from torch.utils.data import DataLoader
+import glob
 
 import mia_preprocessing
 import amass_preprocessing
 import motion_representation
 import cal_mean_variance
+from motion_dataset import MotionDataset
+from paramUtil import t2m_kinematic_chain, t2m_raw_offsets, joints_num
+from common.skeleton import Skeleton
+from amass_preprocessing import get_amass_paths, amass_to_pose, initialize_body_models
+from smplx.body_models import SMPLH
 
 
 def parse_arguments():
@@ -84,80 +91,114 @@ def parse_arguments():
         help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)"
     )
     
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=1,
+        help="Batch size for data loading"
+    )
+    
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=0,
+        help="Number of DataLoader worker processes"
+    )
+
+    parser.add_argument(
+        "--example_data_path",
+        type=str,
+        default=None,
+        help="Path to example data file for testing"
+    )
+    
     return parser.parse_args()
 
+def swap_left_right(data):
+    # Swap left/right joints without modifying x-axis (handled outside)
+    assert len(data.shape) == 3 and data.shape[-1] == 3
+    data = data.copy()
+    right_chain = [2, 5, 8, 11, 14, 17, 19, 21]
+    left_chain = [1, 4, 7, 10, 13, 16, 18, 20]
+    left_hand_chain = [22, 23, 24, 34, 35, 36, 25, 26, 27, 31, 32, 33, 28, 29, 30]
+    right_hand_chain = [43, 44, 45, 46, 47, 48, 40, 41, 42, 37, 38, 39, 49, 50, 51]
+    tmp = data[:, right_chain].copy()
+    data[:, right_chain] = data[:, left_chain]
+    data[:, left_chain] = tmp
+    if data.shape[1] > 24:
+        tmp = data[:, right_hand_chain].copy()
+        data[:, right_hand_chain] = data[:, left_hand_chain]
+        data[:, left_hand_chain] = tmp
+    return data
+
+def preprocess_pose(pose, sample_id):
+    # For non-'humanact12' samples, negate the x-axis purposefully
+    if isinstance(sample_id, str) and "humanact12" not in sample_id:
+        pose[..., 0] *= -1
+    # Swap left/right joints
+    pose = swap_left_right(pose)
+    return pose
 
 def process_and_generate_features(args):
     """
     Main function to prepare motion features from input data
-    
-    Args:
-        args: Command line arguments
-    
-    Returns:
-        Dictionary of generated features
-        Mean and standard deviation (if calc_stats is True)
     """
     print(f"Processing {args.data_type} data from {args.input_dir} using {args.device}")
-    
-    # Step 1: Process raw pose data based on data type
-    if args.data_type.lower() == 'mia':
-        print("Step 1: Processing MIA data...")
-        joint_data = mia_preprocessing.process_mia_data(
-            args.input_dir, 
-            args.intermediate_dir if args.save_intermediate else None,
-            args.save_intermediate,
-            args.device
-        )
-    elif args.data_type.lower() == 'amass':
-        print("Step 1: Processing AMASS data...")
-        joint_data = amass_preprocessing.process_amass_dataset(
-            args.input_dir,
-            args.dataset,
-            args.intermediate_dir if args.save_intermediate else None,
-            args.save_intermediate,
-            args.device,
-            body_models_dir=args.body_models_dir  # Pass the body_models_dir parameter
-        )
-    else:
-        raise ValueError(f"Unsupported data type: {args.data_type}. Use 'mia' or 'amass'.")
-    
-    print(f"Processed {len(joint_data)} motion samples.")
-    
-    # Step 2: Generate motion representation features
-    print("Step 2: Generating motion features...")
-    features = {}
-    n_raw_offsets = torch.from_numpy(motion_representation.t2m_raw_offsets)
-    kinematic_chain = motion_representation.t2m_kinematic_chain
-    
-    # Dynamically get an example to determine the target skeleton
-    example_key = next(iter(joint_data))
-    example_data = joint_data[example_key]
-    example_data = torch.from_numpy(example_data)
-    tgt_skel = motion_representation.Skeleton(n_raw_offsets, kinematic_chain, "cpu")
-    tgt_offsets = tgt_skel.get_offsets_joints(example_data[0])
-    
-    # Process each motion sample
-    joints_num = 22  # Standard number of joints
-    for key, positions in tqdm(joint_data.items(), desc="Processing motions"):
-        try:
-            # Process the file using motion_representation functions
-            positions_np = positions[:, :joints_num]
-            data, _, _, _ = motion_representation.process_file(positions_np, 0.002, args.device)
-            features[key] = data
-        except Exception as e:
-            print(f"Error processing {key}: {e}")
-    
-    print(f"Generated features for {len(features)} samples")
+    n_raw_offsets = torch.from_numpy(t2m_raw_offsets)  # Load raw offsets
+    kinematic_chain = t2m_kinematic_chain  # Load kinematic chain configuration
+    male_bm, female_bm = initialize_body_models(body_models_dir=args.body_models_dir, device=args.device)
+    tgt_skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")
+
+    try:
+        sample_id = args.example_data_path
+        amass_to_pose = amass_preprocessing.amass_to_pose
+        pose, _ = amass_to_pose(sample_id, male_bm, female_bm, args.device)
+        pose = preprocess_pose(pose, sample_id)
+        
+        pose = pose.reshape(len(pose), -1, 3)
+        pose = torch.from_numpy(pose)
+        target_offset = tgt_skel.get_offsets_joints(pose[0])
+    except Exception as e:
+        print(f"Error loading example data: {e}")
+        raise
+
+    smpl_h = SMPLH(
+        model_path=f"{args.body_models_dir}/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl", 
+        num_betas=10, 
+        use_pca=False, 
+        batch_size=59
+    )
+    smpl_h.to(args.device)
+
+    # Create dataset and DataLoader for parallel loading
+    dataset = MotionDataset(
+        data_type=args.data_type,
+        input_dir=args.input_dir,
+        dataset=args.dataset,
+        device=args.device,
+        body_models_dir=args.body_models_dir,
+        tgt_skel=tgt_skel,
+        target_offset=target_offset
+    )
+    loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers)
+    features_dict = {}
+    poses_dict = {}
+    # Iterate over batches; each sample is a tuple: (sample_id, raw pose)
+    for sample_ids, features, poses in tqdm(loader, desc="Processing motions"): 
+        for sample_id, feature, pose in zip(sample_ids, features, poses):
+            # Process the raw pose using process_file outside the dataset.
+            features_dict[sample_id] = feature
+            poses_dict[sample_id] = pose
+    print(f"Generated features for {len(features_dict)} samples")
     
     # Step 3: Calculate mean and variance if requested
     mean = None
     std = None
     if args.calc_stats:
         print("Step 3: Calculating mean and variance...")
-        mean, std = cal_mean_variance.calculate_statistics(features)
+        mean, std = cal_mean_variance.calculate_statistics(features_dict)
         
-    return features, mean, std
+    return features_dict, poses_dict, mean, std
 
 
 def save_results(features, mean, std, args):
@@ -180,7 +221,7 @@ def save_results(features, mean, std, args):
         if isinstance(key, str) and os.path.isfile(key):
             # If the key is a file path, use the same directory structure
             rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
-            save_path = os.path.join(args.output_dir, rel_path)
+            save_path = os.path.join(args.output_dir, rel_path).replace(".npz", ".npy")
         else:
             # Otherwise create a unique filename
             save_path = os.path.join(
@@ -208,8 +249,23 @@ def main():
     args = parse_arguments()
     
     # Process data and generate features
-    features, mean, std = process_and_generate_features(args)
+    features, poses, mean, std = process_and_generate_features(args)
+    if args.save_intermediate:
+        # Save intermediate results if requested
+        os.makedirs(args.intermediate_dir, exist_ok=True)
+        for key, pose in poses.items():
+            if isinstance(key, str) and os.path.isfile(key):
+                # If the key is a file path, use the same directory structure
+                rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                save_path = os.path.join(args.intermediate_dir, rel_path).replace(".npz", ".npy")
+            else:
+                save_path = os.path.join(args.intermediate_dir, f"pose_{hash(str(key))}.npy")
+            
+            print(f"Saving intermediate pose to {save_path}...")
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            np.save(save_path, pose)
     
+    print(f"Intermediate poses saved to: {args.intermediate_dir}")
     # Save results
     save_results(features, mean, std, args)
     
@@ -217,4 +273,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import torch.multiprocessing as mp
+    mp.set_start_method("fork", force=True)
     main()

@@ -16,7 +16,7 @@ if len(sys.argv) > 2:
     cuda_dev = sys.argv[2]
     print(dataset_top)
 else:
-    dataset_top = "ACCAD"
+    dataset_top = "KIT"
     print("Not enough argument provided.")
 
 # Choose the device to run the body model on.
@@ -25,11 +25,11 @@ comp_device = torch.device(f"cuda:0")
 
 from human_body_prior.body_model.body_model import BodyModel
 
-male_bm_path = "./body_models/smplh/male/model.npz"
-male_dmpl_path = "./body_models/dmpls/male/model.npz"
+male_bm_path = "/lsdf/users/dschneider-kf3609/workspace/HumanML3D/body_models/smplh/male/model.npz"
+male_dmpl_path = "/lsdf/users/dschneider-kf3609/workspace/HumanML3D/body_models/dmpls/male/model.npz"
 
-female_bm_path = "./body_models/smplh/female/model.npz"
-female_dmpl_path = "./body_models/dmpls/female/model.npz"
+female_bm_path = "/lsdf/users/dschneider-kf3609/workspace/HumanML3D/body_models/smplh/female/model.npz"
+female_dmpl_path = "/lsdf/users/dschneider-kf3609/workspace/HumanML3D/body_models/dmpls/female/model.npz"
 
 num_betas = 10  # number of body parameters
 num_dmpls = 8  # number of DMPL parameters
@@ -46,7 +46,8 @@ female_bm = BodyModel(
 paths = []
 folders = []
 dataset_names = []
-for root, dirs, files in os.walk("./amass_data"):
+
+for root, dirs, files in os.walk("/cvhci/temp/rdueger/MuscleSim"):
     #     print(root, dirs, files)
     #     for folder in dirs:
     #         folders.append(os.path.join(root, folder))
@@ -56,13 +57,19 @@ for root, dirs, files in os.walk("./amass_data"):
     for name in files:
         if name in ["LICENSE.txt"]:
             continue
-        dataset_name = root.split("/")[2]
+        
+        split = root.split("/")
+        if len(split) < 6:
+            continue
+        dataset_name = split[5]
+        
         if dataset_name not in dataset_names:
             dataset_names.append(dataset_name)
         paths.append(os.path.join(root, name))
 
+
 save_root = "./pose_data"
-save_folders = [folder.replace("./amass_data", "./pose_data") for folder in folders]
+save_folders = [folder.replace("/cvhci/temp/rdueger/MuscleSim", "./pose_data") for folder in folders]
 for folder in save_folders:
     os.makedirs(folder, exist_ok=True)
 group_path = [[path for path in paths if name in path] for name in dataset_names]
@@ -123,7 +130,8 @@ cur_count = 0
 import time
 
 for paths in group_path:
-    dataset_name = paths[0].split("/")[2]
+    print(paths)
+    dataset_name = paths[0].split("/")[5]
     print(dataset_name)
     print(dataset_top)
     if dataset_name != dataset_top:

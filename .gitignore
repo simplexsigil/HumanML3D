@@ -29,12 +29,14 @@ HumanML3D/*.csv
 HumanML3D/train.txt.all
 *.npy
 *.mp4
+*.pyc
 
 # Compiled Python files
 *.py[co]
 
 # Temporary files
 *.tmp*
+
 
 # Modified data files you might want to exclude
 # Uncomment if you don't want to track changes to these files

@@ -4,6 +4,7 @@ import numpy as np
 from tqdm import tqdm
 from human_body_prior.tools.omni_tools import copy2cpu as c2c
 from human_body_prior.body_model.body_model import BodyModel
+import cProfile
 
 # Set OpenGL platform
 os.environ["PYOPENGL_PLATFORM"] = "egl"
@@ -43,7 +44,8 @@ def initialize_body_models(body_models_dir="./body_models", device=None):
 def amass_to_pose(src_path, male_bm, female_bm, device):
     """Convert AMASS motion data to joint positions"""
     
-    bdata = np.load(src_path, allow_pickle=True)
+    bdata = np.load(src_path, allow_pickle=True, mmap_mode='r')
+
     fps = 0
     
     try:
@@ -61,53 +63,47 @@ def amass_to_pose(src_path, male_bm, female_bm, device):
         bm = female_bm
         
     down_sample = int(fps / TARGET_FPS)
-    
+
+    bdata_poses = bdata["poses"][::down_sample]
+    bdata_trans = bdata["trans"][::down_sample]
+    root_orients = torch.from_numpy(bdata_poses[:, :3]).float().to(device)
+    pose_bodies  = torch.from_numpy(bdata_poses[:, 3:66]).float().to(device)
+    pose_hands   = torch.from_numpy(bdata_poses[:, 66:]).float().to(device)
+    betas = torch.from_numpy(bdata["betas"][:10][np.newaxis]).float().to(device).expand(len(bdata_poses), -1)
+    trans = torch.from_numpy(bdata_trans).float().to(device)
+
     with torch.no_grad():
-        for fId in range(0, frame_number, down_sample):
-            root_orient = torch.Tensor(bdata["poses"][fId : fId + 1, :3]).to(device)
-            pose_body = torch.Tensor(bdata["poses"][fId : fId + 1, 3:66]).to(device)
-            pose_hand = torch.Tensor(bdata["poses"][fId : fId + 1, 66:]).to(device)
-            betas = torch.Tensor(bdata["betas"][:10][np.newaxis]).to(device)
-            trans = torch.Tensor(bdata["trans"][fId : fId + 1]).to(device)
-            
-            body = bm(pose_body=pose_body, pose_hand=pose_hand, betas=betas, root_orient=root_orient)
-            joint_loc = body.Jtr[0] + trans
-            pose_seq.append(joint_loc.unsqueeze(0))
-            
-    if not pose_seq:  # If no frames were processed
-        return None, fps
+        body = bm(pose_body=pose_bodies, pose_hand=pose_hands, betas=betas, root_orient=root_orients, trans=trans)
+        # Assuming bm returns batched joints with shape (batch, joints, 3)
         
-    pose_seq = torch.cat(pose_seq, dim=0)
-    pose_seq_np = pose_seq.detach().cpu().numpy()
+    pose_seq_np = body.Jtr.detach().cpu().numpy()
     pose_seq_np_n = np.dot(pose_seq_np, TRANS_MATRIX)
     
     return pose_seq_np_n, fps
 
 
 def get_amass_paths(dataset_dir):
-    """Get all AMASS dataset paths"""
-    paths = []
-    folders = []
-    dataset_names = []
+    """Get all AMASS dataset paths by grouping .npz files based on the first subdirectory"""
+    paths_by_dataset = {}
     
     for root, dirs, files in os.walk(dataset_dir):
-        folders.append(root)
         if "tars" in dirs:
             dirs.remove("tars")
         for name in files:
-            if name in ["LICENSE.txt"]:
+            if name in ["LICENSE.txt", "path_mappings.csv", "paths.txt"]:
                 continue
-            # Fix: Make sure dataset_name extraction is consistent with original code
-            try:
-                dataset_name = root.split("/")[2]
-                if dataset_name not in dataset_names:
-                    dataset_names.append(dataset_name)
-            except IndexError:
-                # Handle case where path structure doesn't have enough components
+            # Process only .npz files
+            if not name.endswith(".npz"):
                 continue
-            paths.append(os.path.join(root, name))
+            full_path = os.path.join(root, name)
+            # Use relative path to extract dataset name from the first folder level
+            relative = os.path.relpath(full_path, dataset_dir)
+            parts = relative.split(os.sep)
+            dataset_name = parts[0]
+            paths_by_dataset.setdefault(dataset_name, []).append(full_path)
     
-    group_path = [[path for path in paths if name in path] for name in dataset_names]
+    dataset_names = list(paths_by_dataset.keys())
+    group_path = list(paths_by_dataset.values())
     return group_path, dataset_names
 
 
@@ -130,20 +126,17 @@ def process_amass_dataset(dataset_dir, dataset_name=None, output_dir=None, save_
     
     # Get paths for datasets
     group_path, dataset_names = get_amass_paths(dataset_dir)
+    print(dataset_names)
+    print(group_path[0])
     
     results = {}
     all_count = sum([len(paths) for paths in group_path])
     cur_count = 0
     
-    for paths in group_path:
+    for paths,current_dataset in zip(group_path,dataset_names):
         if not paths:
             continue
-            
-        try:
-            current_dataset = paths[0].split("/")[2]
-        except IndexError:
-            continue
-        
+        print(current_dataset)
         # Skip if not the requested dataset
         if dataset_name and current_dataset != dataset_name:
             continue
@@ -151,27 +144,38 @@ def process_amass_dataset(dataset_dir, dataset_name=None, output_dir=None, save_
         pbar = tqdm(paths)
         pbar.set_description(f"Processing: {current_dataset}")
         fps = 0  # Keep track of fps for reporting
-        
+
+        profiler = cProfile.Profile()
+        iteration_count = 0
+
         for path in pbar:
+            # Enable profiler only for the first 10 iterations
+            if iteration_count == 0:
+                profiler.enable()
+
             if save_intermediate and output_dir:
                 save_path = path.replace(dataset_dir, output_dir)
                 save_path = save_path[:-3] + "npy"
-                # Create directories if they don't exist
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            
-            # Process the pose data
+
             pose_data, current_fps = amass_to_pose(path, male_bm, female_bm, device)
             fps = current_fps  # Update fps
-            
+
             if pose_data is not None:
-                # Store result in memory
                 results[path] = pose_data
-                
                 if save_intermediate and output_dir:
                     np.save(save_path, pose_data)
-            
+
+            iteration_count += 1
             cur_count += 1
-            
+
+            if iteration_count == 10:
+                profiler.disable()
+                profiler.dump_stats("profile_output.prof")
+                print("Saved profiling data for 10 iterations to profile_output.prof")
+                
+            # Continue processing without profiling for iterations >10
+
         print(f"Processed / All (fps {fps}): {cur_count}/{all_count}")
     
     return results

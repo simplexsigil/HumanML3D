@@ -7,7 +7,7 @@ from os.path import join as pjoin
 
 from common.skeleton import Skeleton
 from common.quaternion import *
-from paramUtil import *
+from paramUtil import t2m_raw_offsets, t2m_kinematic_chain, joints_num, l_idx1, l_idx2, fid_r, fid_l, face_joint_indx, r_hip, l_hip
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -117,6 +117,8 @@ def uniform_skeleton(positions, target_offset):
     """
 
     # Initialize a skeleton instance with raw joint offsets and kinematic chain for calculations
+    n_raw_offsets = torch.from_numpy(t2m_raw_offsets)
+    kinematic_chain = t2m_kinematic_chain
     src_skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")
 
     # Extract the first frame's joint offsets to use as the source skeleton reference
@@ -146,7 +148,7 @@ def uniform_skeleton(positions, target_offset):
 
 
 # Define a function to process each file, adjusting positions and orientations
-def process_file(positions, feet_thre, device=None):
+def process_file(positions, target_offset, feet_thre, device=None):
     """
     Processes a file of joint positions to align the motion with a target skeleton, set the animation
     to start at the origin with the character facing forward, and detect foot contacts based on
@@ -157,6 +159,7 @@ def process_file(positions, feet_thre, device=None):
 
     Parameters:
     - positions (numpy.ndarray): The joint positions across all frames.
+    - target_offset (torch.Tensor): The target skeleton joint offsets.
     - feet_thre (float): Threshold below which velocity indicates a foot contact.
     - device (str or torch.device): Device to run computations on.
 
@@ -174,7 +177,7 @@ def process_file(positions, feet_thre, device=None):
     # plot_3d_motion("./positions_non_uniform.mp4", kinematic_chain, positions, "title", fps=20)
 
     # Normalize the skeleton of the motion to match the target skeleton
-    positions = uniform_skeleton(positions, tgt_offsets)
+    positions = uniform_skeleton(positions, target_offset)
 
     # plot_3d_motion("./positions_uniform.mp4", kinematic_chain, positions, "title", fps=20)
 
@@ -286,6 +289,8 @@ def process_file(positions, feet_thre, device=None):
         - velocity (numpy.ndarray): Root linear velocity across frames.
         - r_rot (numpy.ndarray): Root rotation quaternion for all frames.
         """
+        n_raw_offsets = torch.from_numpy(t2m_raw_offsets)
+        kinematic_chain = t2m_kinematic_chain
         skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")  # Initialize skeleton for kinematics
 
         # (seq_len, joints_num, 4)
@@ -329,7 +334,8 @@ def process_file(positions, feet_thre, device=None):
         - velocity (numpy.ndarray): Linear velocity of the root joint across frames.
         - r_rot (numpy.ndarray): Root rotation quaternion used for the velocity calculations.
         """
-
+        n_raw_offsets = torch.from_numpy(t2m_raw_offsets)
+        kinematic_chain = t2m_kinematic_chain
         skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")  # Initialize skeleton for kinematics
         # (seq_len, joints_num, 4)
         quat_params = skel.inverse_kinematics_np(
@@ -387,10 +393,17 @@ def process_file(positions, feet_thre, device=None):
 
     """Get Joint Velocity Representation"""
     # (seq_len-1, joints_num*3)
-    local_vel = qrot_np(
-        np.repeat(r_rot[:-1, None], global_positions.shape[1], axis=1), global_positions[1:] - global_positions[:-1]
-    )
-    local_vel = local_vel.reshape(len(local_vel), -1)  # Flatten local velocities for all joints
+    try:
+        local_vel = qrot_np(
+            np.repeat(r_rot[:-1, None], global_positions.shape[1], axis=1), global_positions[1:] - global_positions[:-1]
+        )
+        local_vel = local_vel.reshape(len(local_vel), -1)  # Flatten local velocities for all joints
+    except:
+        print("Error in calculating local velocities")
+        print(global_positions.shape, r_rot.shape)
+        print(global_positions[1:].shape, global_positions[:-1].shape)
+        print(positions)
+        print(target_offset)
 
     data = root_data  # Start constructing the final data array with root data
     data = np.concatenate([data, ric_data[:-1]], axis=-1)  # Add joint positions
@@ -517,164 +530,7 @@ def recover_from_ric(data, joints_num):
 """
 Data Generation
 """
-# Lower legs
-l_idx1, l_idx2 = 5, 8  # Lower leg indices for scaling calculation
-# Right/Left foot
-fid_r, fid_l = [8, 11], [7, 10]  # Indices for right and left feet
-# Face direction, r_hip, l_hip, sdr_r, sdr_l
-face_joint_indx = [2, 1, 17, 16]  # Indices for calculating facing direction
-# l_hip, r_hip
-r_hip, l_hip = 2, 1  # Hip indices for facing direction calculation
-joints_num = 22  # Total number of joints in the skeleton
-# ds_num = 8
-
-'''
-dataset = "MIA"
-
-if dataset == "AMASS":
-    example_id = "EyesJapanDataset/frederic/walk-04-fast-frederic_poses"
-
-    data_dir = "./joints_comp/"  # Directory containing joint data
-    proc_joints_dir = "./HumanML3D/new_joints_comp/"  # Directory for saving processed data
-    full_motion_dir = "./HumanML3D/new_joint_comp_vecs/"  # Directory for saving component vectors
-elif dataset == "MIA":
-    example_id = "train/Subject4/SlowSkater/1137"
-
-    data_dir = "MIAHML3D/joints/"  # Directory containing joint data
-    proc_joints_dir = "MIAHML3D/proc_joints/"  # Directory for saving processed data
-    full_motion_dir = "MIAHML3D/motion_vects/"  # Directory for saving component vectors
-
-os.makedirs(proc_joints_dir, exist_ok=True)
-os.makedirs(full_motion_dir, exist_ok=True)
-
-n_raw_offsets = torch.from_numpy(t2m_raw_offsets)  # Load raw offsets
-kinematic_chain = t2m_kinematic_chain  # Load kinematic chain configuration
-
-# Load example data and prepare target skeleton offsets
-example_data = np.load(os.path.join(data_dir, example_id + ".npy"))
-example_data = example_data.reshape(len(example_data), -1, 3)
-example_data = torch.from_numpy(example_data)
-tgt_skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")  # Initialize target skeleton
-# (joints_num, 3)
-tgt_offsets = tgt_skel.get_offsets_joints(example_data[0])  # Get target offsets for the example
-print(tgt_offsets)  # Print target offsets for debugging
-
-example_data = np.load(os.path.join(data_dir, example_id + ".npy"))[:, :joints_num]
-process_file(example_data, 0.002)
 
 
-import glob
-
-source_list = glob.glob(os.path.join(data_dir, "**/*.npy"), recursive=True)  # Load all source data files
-glob.glob(os.path.join(data_dir, "**/*.npy"), recursive=True)
-print(source_list[0])  # Print first source file for verification
-print(len(source_list))  # Print number of source files for tracking
 
 
-frame_num = 0  # Initialize frame count
-for source_file in tqdm(source_list):  # Process each source file
-    source_data = np.load(os.path.join(source_file))[:, :joints_num]
-    target_file = os.path.normpath(source_file).split(os.sep)[1:]
-
-    target_file[0] = proc_joints_dir
-    dirs_1 = pjoin(*target_file[:-1])
-
-    target_file2 = target_file[:]
-
-    target_file2[0] = full_motion_dir
-    dirs_2 = pjoin(*target_file2[:-1])
-
-    os.makedirs(dirs_1, exist_ok=True)
-    os.makedirs(dirs_2, exist_ok=True)
-
-    try:
-        data, ground_positions, positions, l_velocity = process_file(source_data, 0.002)
-        rec_ric_data = recover_from_ric(torch.from_numpy(data).unsqueeze(0).float(), joints_num)
-        np.save(pjoin(*target_file), rec_ric_data.squeeze().numpy())
-        np.save(pjoin(*target_file2), data)
-        frame_num += data.shape[0]
-    except Exception as e:
-        print(source_file)
-        print(e)
-#         print(source_file)
-#         break
-
-print("Total clips: %d, Frames: %d, Duration: %fm" % (len(source_list), frame_num, frame_num / 20 / 60))
-'''
-
-def process_motion_data(joint_data, device=None):
-    """
-    Process motion data to generate motion features
-    
-    Args:
-        joint_data: Dictionary of joint positions
-        device: Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)
-        
-    Returns:
-        Dictionary of motion features
-    """
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    elif isinstance(device, str):
-        device = torch.device(device)
-    
-    # Implement motion processing logic using existing code
-    # This would convert joint positions to the motion representation
-    # used by HumanML3D
-    
-    # Placeholder implementation - replace with actual code
-    features = {}
-    for key, positions in tqdm(joint_data.items(), desc="Processing motions"):
-        try:
-            positions_np = positions[:, :joints_num]
-            data, _, _, _ = process_file(positions_np, 0.002, device)
-            features[key] = data
-        except Exception as e:
-            print(f"Error processing {key}: {e}")
-    
-    return features
-
-
-def process_from_files(joint_files_dir, device=None):
-    """
-    Process motion data from files
-    
-    Args:
-        joint_files_dir: Directory containing joint position files
-        device: Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)
-        
-    Returns:
-        Dictionary of motion features
-    """
-    joint_data = {}
-    
-    # Load joint data from files
-    for root, _, files in os.walk(joint_files_dir):
-        for file in files:
-            if file.endswith('.npy'):
-                path = os.path.join(root, file)
-                joint_data[path] = np.load(path)
-    
-    return process_motion_data(joint_data, device)
-
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Process motion data into features")
-    parser.add_argument("--input_dir", type=str, required=True, help="Directory containing joint position files")
-    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save processed features")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
-                        help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)")
-    args = parser.parse_args()
-    
-    features = process_from_files(args.input_dir, args.device)
-    
-    # Save features to output directory
-    os.makedirs(args.output_dir, exist_ok=True)
-    for key, feature in features.items():
-        save_path = os.path.join(
-            args.output_dir, 
-            os.path.relpath(key, args.input_dir)
-        )
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        np.save(save_path, feature)
