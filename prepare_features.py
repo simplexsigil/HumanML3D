@@ -218,16 +218,21 @@ def save_results(features, mean, std, args):
     print(f"Saving features to {args.output_dir}...")
     for key, feature in tqdm(features.items(), desc="Saving features"):
         # Create a sensible filename from the key
-        if isinstance(key, str) and os.path.isfile(key):
-            # If the key is a file path, use the same directory structure
-            rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
-            save_path = os.path.join(args.output_dir, rel_path).replace(".npz", ".npy")
+        if args.data_type == "amass":
+            if isinstance(key, str) and os.path.isfile(key):
+                # If the key is a file path, use the same directory structure
+                rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                save_path = os.path.join(args.output_dir, rel_path).replace(".npz", ".npy")
+            else:
+                # Otherwise create a unique filename
+                save_path = os.path.join(
+                    args.output_dir,
+                    f"feature_{hash(str(key))}.npy"
+                )
         else:
-            # Otherwise create a unique filename
-            save_path = os.path.join(
-                args.output_dir,
-                f"feature_{hash(str(key))}.npy"
-            )
+            # For MIA, use the sample ID directly
+            rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+            save_path = os.path.join(args.output_dir, rel_path, "feature.npy")
         
         # Ensure the directory exists
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
@@ -253,15 +258,23 @@ def main():
     if args.save_intermediate:
         # Save intermediate results if requested
         os.makedirs(args.intermediate_dir, exist_ok=True)
-        for key, pose in poses.items():
-            if isinstance(key, str) and os.path.isfile(key):
-                # If the key is a file path, use the same directory structure
-                rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
-                save_path = os.path.join(args.intermediate_dir, rel_path).replace(".npz", ".npy")
+        for key, pose in tqdm(poses.items(), desc="Saving intermediate poses"):
+            if args.data_type == "amass":
+                if isinstance(key, str) and os.path.isfile(key):
+                    # If the key is a file path, use the same directory structure
+                    rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                    save_path = os.path.join(args.intermediate_dir, rel_path).replace(".npz", ".npy")
+                else:
+                    # Otherwise create a unique filename
+                    save_path = os.path.join(
+                        args.intermediate_dir,
+                        f"pose_{hash(str(key))}.npy"
+                    )
             else:
-                save_path = os.path.join(args.intermediate_dir, f"pose_{hash(str(key))}.npy")
+                # For MIA, use the sample ID directly
+                rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                save_path = os.path.join(args.intermediate_dir, rel_path, "pose.npy")
             
-            print(f"Saving intermediate pose to {save_path}...")
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             np.save(save_path, pose)
     

@@ -49,7 +49,7 @@ class MotionDataset(Dataset):
             # Initialize SMPLH body model
             from smplx.body_models import SMPLH
             self.smpl_h = SMPLH(
-                model_path="./body_models/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl", 
+                model_path=f"{body_models_dir}/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl", 
                 num_betas=10, 
                 use_pca=False, 
                 batch_size=59
@@ -77,7 +77,11 @@ class MotionDataset(Dataset):
             pose = self.mia_to_pose(sample_id, self.smpl_h, self.device)
         else:  # amass
             pose, _ = self.amass_to_pose(sample_id, self.male_bm, self.female_bm, self.device)
-            #pose = preprocess_pose(pose, sample_id)
+            if pose is None:
+                print(f"Pose data is None for sample {sample_id}. Skipping...")
+                return sample_id, [], []
+                
+            pose = preprocess_pose(pose, sample_id)
         
         # Preprocess pose: negate x-axis if needed and swap left/right joints
 
