@@ -95,9 +95,9 @@ def swap_left_right(data):
     return data
 
 
-def preprocess_pose(pose, sample_id):
+def preprocess_pose(pose, rotate=False):
     # For non-'humanact12' samples, negate the x-axis purposefully
-    if isinstance(sample_id, str) and "humanact12" not in sample_id:
+    if rotate:
         pose[..., 0] *= -1
     # Swap left/right joints
     pose = swap_left_right(pose)
@@ -117,10 +117,12 @@ def process_and_generate_features(args):
     # Here we load a sample to get a default skeleton which is used as reference
     # for the rest of the dataset. All other sample skeletons are scaled to this to normalize.
     try:
-        sample_id = args.skeleton_reference_path
+        reference_sample_path = args.skeleton_reference_path
         amass_to_pose = amass_preprocessing.amass_to_pose
-        pose, _ = amass_to_pose(sample_id, male_bm, female_bm, args.device)
-        pose = preprocess_pose(pose, sample_id)
+        pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
+
+        rotate = isinstance(reference_sample_path, str) and "humanact12" not in reference_sample_path
+        pose = preprocess_pose(pose, rotate=rotate)
 
         pose = pose.reshape(len(pose), -1, 3)
         pose = torch.from_numpy(pose)
@@ -152,10 +154,10 @@ def process_and_generate_features(args):
     poses_dict = {}
     # Iterate over batches; each sample is a tuple: (sample_id, raw pose)
     for sample_ids, features, poses in tqdm(loader, desc="Processing motions"):
-        for sample_id, feature, pose in zip(sample_ids, features, poses):
+        for sample, feature, pose in zip(sample_ids, features, poses):
             # Process the raw pose using process_file outside the dataset.
-            features_dict[sample_id] = feature
-            poses_dict[sample_id] = pose
+            features_dict[sample] = feature
+            poses_dict[sample] = pose
     print(f"Generated features for {len(features_dict)} samples")
 
     # Step 3: Calculate mean and variance if requested
@@ -221,7 +223,7 @@ def main():
 
     if args.skeleton_reference_path is None:
         args.skeleton_reference_path = (
-            "EyesJapanDataset/frederic/walk-04-fast-frederic_poses"
+            "EyesJapanDataset/Eyes_Japan_Dataset/frederic/walk-04-fast-frederic_poses.npz"
             if args.data_type == "amass"
             else "train/Subject4/SlowSkater/1137" if args.data_type == "mia" else None
         )
