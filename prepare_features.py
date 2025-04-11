@@ -117,11 +117,13 @@ def process_and_generate_features(args):
     # Here we load a sample to get a default skeleton which is used as reference
     # for the rest of the dataset. All other sample skeletons are scaled to this to normalize.
     try:
+        print("Loading reference sample for skeleton normalization...")
         reference_sample_path = args.skeleton_reference_path
         amass_to_pose = amass_preprocessing.amass_to_pose
         pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
 
-        rotate = isinstance(reference_sample_path, str) and "humanact12" not in reference_sample_path
+        rotate = isinstance(reference_sample_path, str) and ("humanact12" not in reference_sample_path)
+
         pose = preprocess_pose(pose, rotate=rotate)
 
         pose = pose.reshape(len(pose), -1, 3)
@@ -158,6 +160,8 @@ def process_and_generate_features(args):
             # Process the raw pose using process_file outside the dataset.
             features_dict[sample] = feature
             poses_dict[sample] = pose
+            
+        break  # For testing, we only process the first batch
     print(f"Generated features for {len(features_dict)} samples")
 
     # Step 3: Calculate mean and variance if requested
