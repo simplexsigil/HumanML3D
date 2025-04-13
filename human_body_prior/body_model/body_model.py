@@ -25,7 +25,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
-
+from pytorch3d.transforms import axis_angle_to_matrix
 # from smplx.lbs import lbs
 from human_body_prior.body_model.lbs import lbs
 import sys
@@ -281,9 +281,15 @@ class BodyModel(nn.Module):
             v_template = self.init_v_template.expand(batch_size, -1, -1)
         if betas is None:
             betas = self.init_betas.expand(batch_size, -1)
-
+ 
         if self.model_type in ["smplh", "smpl"]:
-            full_pose = torch.cat([root_orient, pose_body, pose_hand], dim=-1)
+            # [121, 90] → [121 * 30, 3]
+            pose_hand_reshaped = pose_hand.reshape(-1, 3)
+            # Convert each 3D axis-angle to 3x3 rotation matrix
+            pose_hand_rotmat = axis_angle_to_matrix(pose_hand_reshaped)  # [121*30, 3, 3]
+            # Reshape to [121, 30, 3, 3]
+            pose_hand_rotmat = pose_hand_rotmat.reshape(121, 30, 3, 3)
+            full_pose = torch.cat([root_orient, pose_body, pose_hand_rotmat], dim=1)
         elif self.model_type == "smplx":
             full_pose = torch.cat(
                 [root_orient, pose_body, pose_jaw, pose_eye, pose_hand], dim=-1
@@ -321,6 +327,7 @@ class BodyModel(nn.Module):
             joints=joints,
             v_shaped=v_shaped,
             dtype=self.dtype,
+            pose2rot= False
         )
 
         Jtr = Jtr + trans.unsqueeze(dim=1)

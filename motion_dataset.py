@@ -63,6 +63,14 @@ class MotionDataset(Dataset):
                 if (self.dataset_filter is None) or (name == self.dataset_filter):
                     self.samples.extend(paths)
             self.male_bm, self.female_bm = initialize_body_models(body_models_dir=body_models_dir, device=self.device)
+        elif self.data_type == "4dhumans":
+            from humans4d_preprocessing import get_4dhumans_paths, humans4d_to_pose, initialize_body_models
+            self.humans4d_to_pose = humans4d_to_pose 
+            group_paths, dataset_names = get_4dhumans_paths(input_dir)
+            for paths, name in zip(group_paths, dataset_names):
+                if (self.dataset_filter is None) or (name == self.dataset_filter):
+                    self.samples.extend(paths)
+            self.male_bm, self.female_bm = initialize_body_models(body_models_dir=body_models_dir, device=self.device)          
         else:
             raise ValueError("Unsupported dataset type. Use 'mia' or 'amass'.")
         
@@ -75,6 +83,12 @@ class MotionDataset(Dataset):
         if self.data_type == "mia":
             # Process MIA sample using mia_to_pose and SMPLH model
             pose = self.mia_to_pose(sample_id, self.smpl_h, self.device)
+        elif self.data_type == "4dhumans":
+            pose, _ = self.humans4d_to_pose(sample_id, self.male_bm, self.female_bm, self.device)
+            if pose is None:
+                print(f"Pose data is None for sample {sample_id}. Skipping...")
+                return sample_id, [], []
+            pose = preprocess_pose(pose, sample_id)
         else:  # amass
             pose, _ = self.amass_to_pose(sample_id, self.male_bm, self.female_bm, self.device)
             if pose is None:

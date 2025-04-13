@@ -10,6 +10,7 @@ import glob
 import mia_preprocessing
 import amass_preprocessing
 import motion_representation
+import humans4d_preprocessing
 import cal_mean_variance
 from motion_dataset import MotionDataset
 from paramUtil import t2m_kinematic_chain, t2m_raw_offsets, joints_num
@@ -29,7 +30,7 @@ def parse_arguments():
         "--data_type", 
         type=str, 
         required=True, 
-        choices=["mia", "amass"],
+        choices=["mia", "amass", "4dhumans"],
         help="Type of data to process (mia or amass)"
     )
     
@@ -148,11 +149,18 @@ def process_and_generate_features(args):
     kinematic_chain = t2m_kinematic_chain  # Load kinematic chain configuration
     male_bm, female_bm = initialize_body_models(body_models_dir=args.body_models_dir, device=args.device)
     tgt_skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")
-
     try:
         sample_id = args.example_data_path
-        amass_to_pose = amass_preprocessing.amass_to_pose
-        pose, _ = amass_to_pose(sample_id, male_bm, female_bm, args.device)
+        if args.data_type == "amass":
+            # AMASS approach
+            pose, _ = amass_preprocessing.amass_to_pose(sample_id, male_bm, female_bm, args.device)
+        elif args.data_type == "4dhumans":
+            # 4DHumans approach
+            pose, _ = humans4d_preprocessing.humans4d_to_pose(sample_id, male_bm, female_bm, args.device)
+        else:
+            # e.g. "mia" or fallback
+            raise ValueError(f"No direct example data loader for data_type='{args.data_type}'")
+
         pose = preprocess_pose(pose, sample_id)
         
         pose = pose.reshape(len(pose), -1, 3)
@@ -219,16 +227,19 @@ def save_results(features, mean, std, args):
     for key, feature in tqdm(features.items(), desc="Saving features"):
         # Create a sensible filename from the key
         if args.data_type == "amass":
+            # same logic as before
             if isinstance(key, str) and os.path.isfile(key):
-                # If the key is a file path, use the same directory structure
                 rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
                 save_path = os.path.join(args.output_dir, rel_path).replace(".npz", ".npy")
             else:
-                # Otherwise create a unique filename
-                save_path = os.path.join(
-                    args.output_dir,
-                    f"feature_{hash(str(key))}.npy"
-                )
+                save_path = os.path.join(args.output_dir, f"feature_{hash(str(key))}.npy")
+        elif args.data_type == "4dhumans":
+            # you can define a similar approach for .pkl or keep it simple
+            if isinstance(key, str) and os.path.isfile(key):
+                rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                save_path = os.path.join(args.output_dir, rel_path).replace(".pkl", ".npy")
+            else:
+                save_path = os.path.join(args.output_dir, f"feature_{hash(str(key))}.npy")
         else:
             # For MIA, use the sample ID directly
             rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
@@ -261,15 +272,16 @@ def main():
         for key, pose in tqdm(poses.items(), desc="Saving intermediate poses"):
             if args.data_type == "amass":
                 if isinstance(key, str) and os.path.isfile(key):
-                    # If the key is a file path, use the same directory structure
                     rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
                     save_path = os.path.join(args.intermediate_dir, rel_path).replace(".npz", ".npy")
                 else:
-                    # Otherwise create a unique filename
-                    save_path = os.path.join(
-                        args.intermediate_dir,
-                        f"pose_{hash(str(key))}.npy"
-                    )
+                    save_path = os.path.join(args.intermediate_dir, f"pose_{hash(str(key))}.npy")
+            elif args.data_type == "4dhumans":
+                if isinstance(key, str) and os.path.isfile(key):
+                    rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                    save_path = os.path.join(args.intermediate_dir, rel_path).replace(".pkl", ".npy")
+                else:
+                    save_path = os.path.join(args.intermediate_dir, f"pose_{hash(str(key))}.npy")
             else:
                 # For MIA, use the sample ID directly
                 rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
