@@ -10,6 +10,7 @@ def swap_left_right(data):
     # Swap left/right joints without modifying x-axis (handled outside)
     assert len(data.shape) == 3 and data.shape[-1] == 3
     data = data.copy()
+    data[..., 0] *= -1  # Negate x-axis
     right_chain = [2, 5, 8, 11, 14, 17, 19, 21]
     left_chain = [1, 4, 7, 10, 13, 16, 18, 20]
     left_hand_chain = [22, 23, 24, 34, 35, 36, 25, 26, 27, 31, 32, 33, 28, 29, 30]

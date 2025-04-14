@@ -22,10 +22,9 @@ from smplx.body_models import SMPLH
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Process motion data and prepare features",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        description="Process motion data and prepare features", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    
+
     parser.add_argument(
         "--data_type", 
         type=str, 
@@ -33,87 +32,55 @@ def parse_arguments():
         choices=["mia", "amass", "4dhumans"],
         help="Type of data to process (mia or amass)"
     )
-    
+
+    parser.add_argument("--input_dir", type=str, required=True, help="Directory containing raw motion data")
+
+    parser.add_argument("--output_dir", type=str, required=True, help="Directory to save final processed features")
+
     parser.add_argument(
-        "--input_dir", 
-        type=str, 
-        required=True, 
-        help="Directory containing raw motion data"
+        "--dataset", type=str, help="For AMASS: specific dataset to process (if not specified, process all)"
     )
-    
+
+    parser.add_argument("--save_intermediate", action="store_true", help="Save intermediate results to disk")
+
     parser.add_argument(
-        "--output_dir", 
-        type=str, 
-        required=True, 
-        help="Directory to save final processed features"
+        "--intermediate_dir", type=str, help="Directory to save intermediate results (if save_intermediate is True)"
     )
-    
+
+    parser.add_argument("--calc_stats", action="store_true", help="Calculate mean and standard deviation of features")
+
     parser.add_argument(
-        "--dataset", 
-        type=str, 
-        help="For AMASS: specific dataset to process (if not specified, process all)"
+        "--stats_dir",
+        type=str,
+        help="Directory to save mean and std statistics (defaults to output_dir if not specified)",
     )
-    
-    parser.add_argument(
-        "--save_intermediate", 
-        action="store_true", 
-        help="Save intermediate results to disk"
-    )
-    
-    parser.add_argument(
-        "--intermediate_dir", 
-        type=str, 
-        help="Directory to save intermediate results (if save_intermediate is True)"
-    )
-    
-    parser.add_argument(
-        "--calc_stats", 
-        action="store_true", 
-        help="Calculate mean and standard deviation of features"
-    )
-    
-    parser.add_argument(
-        "--stats_dir", 
-        type=str, 
-        help="Directory to save mean and std statistics (defaults to output_dir if not specified)"
-    )
-    
+
     parser.add_argument(
         "--body_models_dir",
         type=str,
         default="./body_models",
-        help="Directory containing SMPL-H body models (required for AMASS processing)"
+        help="Directory containing SMPL-H body models (required for AMASS processing)",
     )
-    
+
     parser.add_argument(
         "--device",
         type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
-        help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)"
-    )
-    
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=1,
-        help="Batch size for data loading"
-    )
-    
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=0,
-        help="Number of DataLoader worker processes"
+        help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)",
     )
 
+    parser.add_argument("--batch_size", type=int, default=1, help="Batch size for data loading")
+
+    parser.add_argument("--num_workers", type=int, default=0, help="Number of DataLoader worker processes")
+
     parser.add_argument(
-        "--example_data_path",
-        type=str,
-        default=None,
-        help="Path to example data file for testing"
+        "--skeleton_reference_path", type=str, default=None, help="Path to example data file for testing"
     )
-    
+    # For AMASS: "EyesJapanDataset/frederic/walk-04-fast-frederic_poses"
+    # For MIA: "train/Subject4/SlowSkater/1137"
+
     return parser.parse_args()
+
 
 def swap_left_right(data):
     # Swap left/right joints without modifying x-axis (handled outside)
@@ -132,13 +99,15 @@ def swap_left_right(data):
         data[:, left_hand_chain] = tmp
     return data
 
-def preprocess_pose(pose, sample_id):
+
+def preprocess_pose(pose, rotate=False):
     # For non-'humanact12' samples, negate the x-axis purposefully
-    if isinstance(sample_id, str) and "humanact12" not in sample_id:
+    if rotate:
         pose[..., 0] *= -1
     # Swap left/right joints
     pose = swap_left_right(pose)
     return pose
+
 
 def process_and_generate_features(args):
     """
@@ -149,32 +118,31 @@ def process_and_generate_features(args):
     kinematic_chain = t2m_kinematic_chain  # Load kinematic chain configuration
     male_bm, female_bm = initialize_body_models(body_models_dir=args.body_models_dir, device=args.device)
     tgt_skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")
-    try:
-        sample_id = args.example_data_path
-        if args.data_type == "amass":
-            # AMASS approach
-            pose, _ = amass_preprocessing.amass_to_pose(sample_id, male_bm, female_bm, args.device)
-        elif args.data_type == "4dhumans":
-            # 4DHumans approach
-            pose, _ = humans4d_preprocessing.humans4d_to_pose(sample_id, male_bm, female_bm, args.device)
-        else:
-            # e.g. "mia" or fallback
-            raise ValueError(f"No direct example data loader for data_type='{args.data_type}'")
 
-        pose = preprocess_pose(pose, sample_id)
-        
+    # Here we load a sample to get a default skeleton which is used as reference
+    # for the rest of the dataset. All other sample skeletons are scaled to this to normalize.
+    try:
+        print("Loading reference sample for skeleton normalization...")
+        reference_sample_path = args.skeleton_reference_path
+        amass_to_pose = amass_preprocessing.amass_to_pose
+        pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
+
+        rotate = isinstance(reference_sample_path, str) and ("humanact12" not in reference_sample_path)
+
+        pose = preprocess_pose(pose, rotate=rotate)
+
         pose = pose.reshape(len(pose), -1, 3)
         pose = torch.from_numpy(pose)
         target_offset = tgt_skel.get_offsets_joints(pose[0])
     except Exception as e:
-        print(f"Error loading example data: {e}")
+        print(f"Error loading reference sample: {e}")
         raise
 
     smpl_h = SMPLH(
-        model_path=f"{args.body_models_dir}/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl", 
-        num_betas=10, 
-        use_pca=False, 
-        batch_size=59
+        model_path=f"{args.body_models_dir}/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl",
+        num_betas=10,
+        use_pca=False,
+        batch_size=59,
     )
     smpl_h.to(args.device)
 
@@ -186,33 +154,35 @@ def process_and_generate_features(args):
         device=args.device,
         body_models_dir=args.body_models_dir,
         tgt_skel=tgt_skel,
-        target_offset=target_offset
+        target_offset=target_offset,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers)
     features_dict = {}
     poses_dict = {}
     # Iterate over batches; each sample is a tuple: (sample_id, raw pose)
-    for sample_ids, features, poses in tqdm(loader, desc="Processing motions"): 
-        for sample_id, feature, pose in zip(sample_ids, features, poses):
+    for sample_ids, features, poses in tqdm(loader, desc="Processing motions"):
+        for sample, feature, pose in zip(sample_ids, features, poses):
             # Process the raw pose using process_file outside the dataset.
-            features_dict[sample_id] = feature
-            poses_dict[sample_id] = pose
+            features_dict[sample] = feature
+            poses_dict[sample] = pose
+            
+        break  # For testing, we only process the first batch
     print(f"Generated features for {len(features_dict)} samples")
-    
+
     # Step 3: Calculate mean and variance if requested
     mean = None
     std = None
     if args.calc_stats:
         print("Step 3: Calculating mean and variance...")
         mean, std = cal_mean_variance.calculate_statistics(features_dict)
-        
+
     return features_dict, poses_dict, mean, std
 
 
 def save_results(features, mean, std, args):
     """
     Save the processed features and statistics
-    
+
     Args:
         features: Dictionary of motion features
         mean: Mean of features (or None)
@@ -221,7 +191,7 @@ def save_results(features, mean, std, args):
     """
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     # Save features
     print(f"Saving features to {args.output_dir}...")
     for key, feature in tqdm(features.items(), desc="Saving features"):
@@ -229,7 +199,10 @@ def save_results(features, mean, std, args):
         if args.data_type == "amass":
             # same logic as before
             if isinstance(key, str) and os.path.isfile(key):
-                rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                # If the key is a file path, use the same directory structure
+                rel_path = (
+                    os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                )
                 save_path = os.path.join(args.output_dir, rel_path).replace(".npz", ".npy")
             else:
                 save_path = os.path.join(args.output_dir, f"feature_{hash(str(key))}.npy")
@@ -244,13 +217,13 @@ def save_results(features, mean, std, args):
             # For MIA, use the sample ID directly
             rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
             save_path = os.path.join(args.output_dir, rel_path, "feature.npy")
-        
+
         # Ensure the directory exists
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        
+
         # Save the feature
         np.save(save_path, feature)
-    
+
     # Save mean and std if calculated
     if mean is not None and std is not None:
         stats_dir = args.stats_dir if args.stats_dir else args.output_dir
@@ -263,16 +236,32 @@ def save_results(features, mean, std, args):
 def main():
     """Main entry point"""
     args = parse_arguments()
-    
+
+    if args.skeleton_reference_path is None:
+        args.skeleton_reference_path = (
+            "EyesJapanDataset/Eyes_Japan_Dataset/frederic/walk-04-fast-frederic_poses.npz"
+            if args.data_type == "amass"
+            else "train/Subject4/SlowSkater/1137" if args.data_type == "mia" else None
+        )
+
+        if args.skeleton_reference_path is None:
+            raise ValueError("skeleton_reference_path must be provided for testing")
+
     # Process data and generate features
     features, poses, mean, std = process_and_generate_features(args)
+
     if args.save_intermediate:
         # Save intermediate results if requested
         os.makedirs(args.intermediate_dir, exist_ok=True)
         for key, pose in tqdm(poses.items(), desc="Saving intermediate poses"):
             if args.data_type == "amass":
                 if isinstance(key, str) and os.path.isfile(key):
-                    rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                    # If the key is a file path, use the same directory structure
+                    rel_path = (
+                        os.path.relpath(key, args.input_dir)
+                        if key.startswith(args.input_dir)
+                        else os.path.basename(key)
+                    )
                     save_path = os.path.join(args.intermediate_dir, rel_path).replace(".npz", ".npy")
                 else:
                     save_path = os.path.join(args.intermediate_dir, f"pose_{hash(str(key))}.npy")
@@ -284,20 +273,23 @@ def main():
                     save_path = os.path.join(args.intermediate_dir, f"pose_{hash(str(key))}.npy")
             else:
                 # For MIA, use the sample ID directly
-                rel_path = os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                rel_path = (
+                    os.path.relpath(key, args.input_dir) if key.startswith(args.input_dir) else os.path.basename(key)
+                )
                 save_path = os.path.join(args.intermediate_dir, rel_path, "pose.npy")
-            
+
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             np.save(save_path, pose)
-    
+
     print(f"Intermediate poses saved to: {args.intermediate_dir}")
     # Save results
     save_results(features, mean, std, args)
-    
+
     print("Feature preparation complete!")
 
 
 if __name__ == "__main__":
     import torch.multiprocessing as mp
+
     mp.set_start_method("fork", force=True)
     main()
