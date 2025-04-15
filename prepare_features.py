@@ -123,17 +123,22 @@ def process_and_generate_features(args):
     # for the rest of the dataset. All other sample skeletons are scaled to this to normalize.
     try:
         print("Loading reference sample for skeleton normalization...")
-        reference_sample_path = args.skeleton_reference_path
-        amass_to_pose = amass_preprocessing.amass_to_pose
-        pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
-
+        if args.data_type == "amass":
+            reference_sample_path = args.skeleton_reference_path
+            amass_to_pose = amass_preprocessing.amass_to_pose
+            pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
+        elif args.data_type == "4dhumans":
+            reference_sample_path = args.skeleton_reference_path
+            humans4d_to_pose = humans4d_preprocessing.humans4d_to_pose
+            pose, _ =  humans4d_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
         rotate = isinstance(reference_sample_path, str) and ("humanact12" not in reference_sample_path)
 
         pose = preprocess_pose(pose, rotate=rotate)
 
         pose = pose.reshape(len(pose), -1, 3)
         pose = torch.from_numpy(pose)
-        target_offset = tgt_skel.get_offsets_joints(pose[0])
+        target_offset = tgt_skel.get_offsets_joints(pose[0])       
+
     except Exception as e:
         print(f"Error loading reference sample: {e}")
         raise
@@ -238,11 +243,15 @@ def main():
     args = parse_arguments()
 
     if args.skeleton_reference_path is None:
-        args.skeleton_reference_path = (
-            "EyesJapanDataset/Eyes_Japan_Dataset/frederic/walk-04-fast-frederic_poses.npz"
-            if args.data_type == "amass"
-            else "train/Subject4/SlowSkater/1137" if args.data_type == "mia" else None
-        )
+        if args.data_type == "amass":
+            args.skeleton_reference_path ="EyesJapanDataset/Eyes_Japan_Dataset/frederic/walk-04-fast-frederic_poses.npz"
+        elif args.data_type == "4dhumans":
+            args.skeleton_reference_path ="EyesJapanDataset/Eyes_Japan_Dataset/frederic/walk-04-fast-frederic_poses.npz"
+        elif args.data_type == "mia":
+            args.skeleton_reference_path = "train/Subject4/SlowSkater/1137" 
+        else:
+            args.skeleton_reference_path = None
+        
 
         if args.skeleton_reference_path is None:
             raise ValueError("skeleton_reference_path must be provided for testing")
