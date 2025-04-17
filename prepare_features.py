@@ -7,14 +7,12 @@ import torch
 from torch.utils.data import DataLoader
 import glob
 
-import mia_preprocessing
-import amass_preprocessing
-import motion_representation
 import cal_mean_variance
 from motion_dataset import MotionDataset
 from paramUtil import t2m_kinematic_chain, t2m_raw_offsets, joints_num
 from common.skeleton import Skeleton
 from amass_preprocessing import get_amass_paths, amass_to_pose, initialize_body_models
+from mia_preprocessing import mia_to_pose
 from smplx.body_models import SMPLH
 
 
@@ -113,14 +111,24 @@ def process_and_generate_features(args):
     kinematic_chain = t2m_kinematic_chain  # Load kinematic chain configuration
     male_bm, female_bm = initialize_body_models(body_models_dir=args.body_models_dir, device=args.device)
     tgt_skel = Skeleton(n_raw_offsets, kinematic_chain, "cpu")
+    smpl_h = SMPLH(
+        model_path=f"{args.body_models_dir}/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl",
+        num_betas=10,
+        use_pca=False,
+        batch_size=59,
+    )
+    smpl_h.to(args.device)
 
     # Here we load a sample to get a default skeleton which is used as reference
     # for the rest of the dataset. All other sample skeletons are scaled to this to normalize.
     try:
         print("Loading reference sample for skeleton normalization...")
         reference_sample_path = args.skeleton_reference_path
-        amass_to_pose = amass_preprocessing.amass_to_pose
-        pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
+        if args.data_type == "amass":
+            pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
+        elif args.data_type == "mia":
+            pose = mia_to_pose(os.path.join(args.input_dir, reference_sample_path), smpl_h, args.device)
+        
 
         rotate = isinstance(reference_sample_path, str) and ("humanact12" not in reference_sample_path)
 
@@ -133,13 +141,6 @@ def process_and_generate_features(args):
         print(f"Error loading reference sample: {e}")
         raise
 
-    smpl_h = SMPLH(
-        model_path=f"{args.body_models_dir}/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl",
-        num_betas=10,
-        use_pca=False,
-        batch_size=59,
-    )
-    smpl_h.to(args.device)
 
     # Create dataset and DataLoader for parallel loading
     dataset = MotionDataset(
@@ -161,7 +162,6 @@ def process_and_generate_features(args):
             features_dict[sample] = feature
             poses_dict[sample] = pose
             
-        break  # For testing, we only process the first batch
     print(f"Generated features for {len(features_dict)} samples")
 
     # Step 3: Calculate mean and variance if requested
