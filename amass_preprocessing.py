@@ -73,12 +73,11 @@ def amass_to_pose(src_path, male_bm, female_bm, device):
     trans = torch.from_numpy(bdata_trans).float().to(device)
 
     with torch.no_grad():
-        body = bm(pose_body=pose_bodies, pose_hand=pose_hands, betas=betas, root_orient=root_orients)
+        body = bm(pose_body=pose_bodies, pose_hand=pose_hands, betas=betas, root_orient=root_orients, trans=trans)
         # Assuming bm returns batched joints with shape (batch, joints, 3)
         
     pose_seq_np = body.Jtr.detach().cpu().numpy()
     pose_seq_np_n = np.dot(pose_seq_np, TRANS_MATRIX)
-    
     
     return pose_seq_np_n, fps
 
