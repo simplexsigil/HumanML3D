@@ -3,7 +3,6 @@ import os
 import argparse
 import numpy as np
 
-os.environ["PYOPENGL_PLATFORM"] = "egl"
 np.bool = np.bool_
 np.int = np.int_
 np.float = np.float_
@@ -15,13 +14,12 @@ np.str = np.str_
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
-import glob
 
 import cal_mean_variance
 from motion_dataset import MotionDataset
-from paramUtil import t2m_kinematic_chain, t2m_raw_offsets, joints_num
+from paramUtil import t2m_kinematic_chain, t2m_raw_offsets
 from common.skeleton import Skeleton
-from amass_preprocessing import get_amass_paths, amass_to_pose, initialize_body_models
+from amass_preprocessing import amass_to_pose, initialize_body_models
 from mia_preprocessing import mia_to_pose
 from smplx.body_models import SMPLH
 

@@ -8,20 +8,19 @@ import cProfile
 
 import torch
 import numpy as np
-import trimesh
-from trimesh.viewer import windowed
-from pyglet import clock, app
 
 
 # Set OpenGL platform
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 # Define constants
-TRANS_MATRIX = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]])
+ROT_MATRIX = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 TARGET_FPS = 20
 
+DO_VISU = False
 
-from visu_utils import visualize_motion_trimesh
+if DO_VISU:
+    from visu_utils import visualize_motion_trimesh
 
 
 def swap_left_right(data):
@@ -115,14 +114,19 @@ def amass_to_pose(src_path, male_bm, female_bm, device):
         body = bm(pose_body=pose_bodies, pose_hand=pose_hands, betas=betas, root_orient=root_orients, trans=trans)
         # Assuming bm returns batched joints with shape (batch, joints, 3)
 
-    # verts = body.v.detach().cpu().numpy()  # shape (N_frames, N_verts, 3)
+    if DO_VISU:
+        verts = body.v.detach().cpu().numpy()  # shape (N_frames, N_verts, 3)
 
-    # visualize_motion_trimesh(
-    #    verts, body.f.detach().cpu().numpy(), title=str(os.path.split(src_path)[-1]), fps=TARGET_FPS
-    # )
+        visualize_motion_trimesh(
+            verts,
+            body.f.detach().cpu().numpy(),
+            title=str(os.path.split(src_path)[-1]),
+            fps=TARGET_FPS,
+            rot_matrix=ROT_MATRIX,
+        )
 
     pose_seq_np = body.Jtr.detach().cpu().numpy()
-    pose_seq_np_n = np.dot(pose_seq_np, TRANS_MATRIX)
+    pose_seq_np_n = np.dot(pose_seq_np, ROT_MATRIX)
 
     # pose_seq_np_n = preprocess_pose(pose_seq_np_n, src_path)
 

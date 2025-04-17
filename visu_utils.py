@@ -5,17 +5,11 @@ from pyglet.gl import *
 import math
 
 
-def rotate_sequence_zup_to_yup(vertices_seq):
-    # -90 degrees around X-axis to map Z-up → Y-up
-    Rx = trimesh.transformations.rotation_matrix(math.radians(-90), [1, 0, 0])
-    rotated_seq = np.einsum("ij,tvj->tvi", Rx[:3, :3], vertices_seq)
-    return rotated_seq
+def visualize_motion_trimesh(vertices_seq, faces, title="SMPL Motion", fps=30, rot_matrix=None):
+    if rot_matrix is not None:
+        vertices_seq = np.dot(vertices_seq, rot_matrix)
 
-
-def visualize_motion_trimesh(vertices_seq, faces, title="SMPL Motion", fps=30):
     print(f"Visualizing {title}")
-    # the original amass samples have z up orientation
-    vertices_seq = rotate_sequence_zup_to_yup(vertices_seq)
 
     vertices_seq = np.asarray(vertices_seq)
     num_frames = len(vertices_seq)
