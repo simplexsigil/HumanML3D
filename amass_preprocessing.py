@@ -64,7 +64,6 @@ def amass_to_pose(src_path, male_bm, female_bm, device):
         
     down_sample = int(fps / TARGET_FPS)
 
-    """
     bdata_poses = bdata["poses"][::down_sample]
     bdata_trans = bdata["trans"][::down_sample]
     root_orients = torch.from_numpy(bdata_poses[:, :3]).float().to(device)
@@ -77,26 +76,9 @@ def amass_to_pose(src_path, male_bm, female_bm, device):
         body = bm(pose_body=pose_bodies, pose_hand=pose_hands, betas=betas, root_orient=root_orients)
         # Assuming bm returns batched joints with shape (batch, joints, 3)
         
-    pose_seq_np = body.Jtr.detach().cpu().numpy() +
+    pose_seq_np = body.Jtr.detach().cpu().numpy()
     pose_seq_np_n = np.dot(pose_seq_np, TRANS_MATRIX)
-    """
-    pose_seq = []
     
-    with torch.no_grad():
-        for fId in range(0, frame_number, down_sample):
-            root_orient = torch.from_numpy(bdata["poses"][fId:fId+1, :3]).float().to(device)
-            pose_body = torch.from_numpy(bdata["poses"][fId:fId+1, 3:66]).float().to(device)
-            pose_hand = torch.from_numpy(bdata["poses"][fId:fId+1, 66:]).float().to(device)
-            betas = torch.from_numpy(bdata["betas"][:10][np.newaxis]).float().to(device)
-            trans = torch.from_numpy(bdata["trans"][fId:fId+1]).float().to(device)
-            
-            body = bm(pose_body=pose_body, pose_hand=pose_hand, betas=betas, root_orient=root_orient)
-            joint_loc = body.Jtr[0] + trans
-            pose_seq.append(joint_loc.unsqueeze(0))
-            
-    pose_seq = torch.cat(pose_seq, dim=0)
-    pose_seq_np = pose_seq.detach().cpu().numpy()
-    pose_seq_np_n = np.dot(pose_seq_np, TRANS_MATRIX)
     
     return pose_seq_np_n, fps
 
