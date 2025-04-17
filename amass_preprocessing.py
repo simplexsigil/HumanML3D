@@ -2,8 +2,8 @@ import os
 import torch
 import numpy as np
 from tqdm import tqdm
-from human_body_prior.tools.omni_tools import copy2cpu as c2c
-from human_body_prior.body_model.body_model import BodyModel
+from HumanML3D.human_body_prior.tools.omni_tools import copy2cpu as c2c
+from HumanML3D.human_body_prior.body_model.body_model import BodyModel
 import cProfile
 
 # Set OpenGL platform

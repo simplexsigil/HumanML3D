@@ -7,17 +7,17 @@ import torch
 from torch.utils.data import DataLoader
 import glob
 
-import mia_preprocessing
-import amass_preprocessing
-import motion_representation
-import humans4d_preprocessing
-import cal_mean_variance
-from motion_dataset import MotionDataset
-from paramUtil import t2m_kinematic_chain, t2m_raw_offsets, joints_num
-from common.skeleton import Skeleton
-from amass_preprocessing import get_amass_paths, amass_to_pose, initialize_body_models
+from HumanML3D import mia_preprocessing
+from HumanML3D import amass_preprocessing
+from HumanML3D import motion_representation
+from HumanML3D import humans4d_preprocessing
+from HumanML3D import cal_mean_variance
+from HumanML3D.motion_dataset import MotionDataset
+from HumanML3D.paramUtil import t2m_kinematic_chain, t2m_raw_offsets, joints_num
+from HumanML3D.common.skeleton import Skeleton
+from HumanML3D.amass_preprocessing import get_amass_paths, amass_to_pose, initialize_body_models
 from smplx.body_models import SMPLH
-from humanml_to_smpl_dataset import ConversionDataset
+from HumanML3D.humanml_to_smpl_dataset import ConversionDataset
 
 
 def parse_arguments():
@@ -131,7 +131,7 @@ def process_and_generate_features(args):
         elif args.data_type == "4dhumans":
             reference_sample_path = args.skeleton_reference_path
             humans4d_to_pose = humans4d_preprocessing.humans4d_to_pose
-            pose, _ =  humans4d_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
+            pose, _, bm =  humans4d_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
         rotate = isinstance(reference_sample_path, str) and ("humanact12" not in reference_sample_path)
 
         pose = preprocess_pose(pose, rotate=rotate)
@@ -165,12 +165,16 @@ def process_and_generate_features(args):
     loader = DataLoader(dataset, batch_size=args.batch_size, num_workers=args.num_workers)
     features_dict = {}
     poses_dict = {}
+    glo = None
+    bpose = None
+    tra = None
     # Iterate over batches; each sample is a tuple: (sample_id, raw pose)
-    for sample_ids, features, poses in tqdm(loader, desc="Processing motions"):
+    for sample_ids, features, poses, global_orient, body_pose, trans in tqdm(loader, desc="Processing motions"):
         for sample, feature, pose in zip(sample_ids, features, poses):
             # Process the raw pose using process_file outside the dataset.
             features_dict[sample] = feature
             poses_dict[sample] = pose
+        glo, bpose, tra = global_orient, body_pose, trans
             
         break  # For testing, we only process the first batch
     print(f"Generated features for {len(features_dict)} samples")
@@ -182,7 +186,7 @@ def process_and_generate_features(args):
         print("Step 3: Calculating mean and variance...")
         mean, std = cal_mean_variance.calculate_statistics(features_dict)
 
-    return features_dict, poses_dict, mean, std
+    return features_dict, poses_dict, mean, std, glo, bpose, tra
 
 
 def save_results(features, mean, std, args):

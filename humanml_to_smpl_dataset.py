@@ -4,8 +4,14 @@ import numpy as np
 from torch.utils.data import Dataset
 from tqdm import tqdm
 #import motion_representation
-from humanml_to_smpl_functions import recover_full_motion_from_data, process_file
-from paramUtil import t2m_raw_offsets, t2m_kinematic_chain, face_joint_indx
+from HumanML3D.humanml_to_smpl_functions import recover_full_motion_from_data, process_file
+from HumanML3D.paramUtil import t2m_raw_offsets, t2m_kinematic_chain, face_joint_indx
+from HumanML3D.humans4d_preprocessing import joints_to_smpl_params, to_smpl_frame
+
+TRANS_MATRIX = np.array([[1.0, 0.0, 0.0],
+                         [0.0, 0.0, 1.0],
+                         [0.0, 1.0, 0.0]])
+INV_TRANS_MATRIX = torch.as_tensor(np.linalg.inv(TRANS_MATRIX), dtype=torch.float32)
 
 def swap_left_right(data):
     # Swap left/right joints without modifying x-axis (handled outside)
@@ -101,7 +107,7 @@ class ConversionDataset(Dataset):
                     self.samples.extend(paths)
             self.male_bm, self.female_bm = initialize_body_models(body_models_dir=body_models_dir, device=self.device)
         elif self.data_type == "4dhumans":
-            from humans4d_preprocessing import get_4dhumans_paths, humans4d_to_pose, initialize_body_models
+            from HumanML3D.humans4d_preprocessing import get_4dhumans_paths, humans4d_to_pose, initialize_body_models, joints_to_smpl_params
             self.humans4d_to_pose = humans4d_to_pose 
             group_paths, dataset_names = get_4dhumans_paths(input_dir)
             for paths, name in zip(group_paths, dataset_names):
@@ -121,7 +127,7 @@ class ConversionDataset(Dataset):
             # Process MIA sample using mia_to_pose and SMPLH model
             pose = self.mia_to_pose(sample_id, self.smpl_h, self.device)
         elif self.data_type == "4dhumans":
-            pose, _ = self.humans4d_to_pose(sample_id, self.male_bm, self.female_bm, self.device)
+            pose, _, bm = self.humans4d_to_pose(sample_id, self.male_bm, self.female_bm, self.device)
             temp_pose = pose
             if pose is None:
                 print(f"Pose data is None for sample {sample_id}. Skipping...")
@@ -146,7 +152,55 @@ class ConversionDataset(Dataset):
             feature, positions, global_positions, positions, l_velocity, floor_height, root_pose_init_xz, root_quat_init  = process_file(positions_np, self.target_offset, 0.002, self.device)
         else:
             feature = []
-        positions = recover_full_motion_from_data( feature, self.target_offset, t2m_raw_offsets, t2m_kinematic_chain, face_joint_indx, floor_height,root_pose_init_xz,root_quat_init)
-        final_pose = preprocess_reverse_pose(positions, sample_id)
+        device='cuda'
+        mdm_ckpt_path = "/home/bkizilcelik/workspace/smpl-tools/mdm/save/humanml_enc_512_50steps/model000750000.pt"
+        from mdm.model.mdm import MDM
+        from mdm.diffusion.gaussian_diffusion import GaussianDiffusion
+        from mdm.utils.model_util import load_saved_model, create_model_and_diffusion
+        from mdm.data_loaders.humanml.utils.paramUtil import t2m_kinematic_chain
+        import json
+        from types import SimpleNamespace   
+        print("Applying MDM denoising on track poses...")
+        with open("/home/bkizilcelik/workspace/smpl-tools/mdm/save/humanml_enc_512_50steps/args.json", "r") as f:
+            args_dict = json.load(f)
+        # Step 2 (optional): Convert to Namespace if needed
+        args = SimpleNamespace(**args_dict)
+        class DummyData:
+            pass
+        dummy_data = DummyData()
+        # Example: set an attribute 'dataset' with required information.
+        # In your context, data.dataset must have 'num_actions' if available.
+        dummy_data.dataset = type("DummyDataset", (), {"num_actions": 1})
+        # Now call the function
+        mdm_model, diffusion = create_model_and_diffusion(args, dummy_data)
+        mdm_model = load_saved_model(model=mdm_model, model_path=mdm_ckpt_path)
+        mdm_model.to(device)
+        mdm_model.eval()
+        poses_tensor = torch.tensor(feature)
+        poses_tensor = poses_tensor.transpose(0, 1).unsqueeze(0).unsqueeze(2)
+        # Apply diffusion denoising.
+        with torch.no_grad():
+            x = poses_tensor.to(device)  # Shape: [B, ...]
+            B, T = x.shape[0], x.shape[-1]  # e.g. batch size B, frames T
+            model_kwargs = {
+                "y": {
+                    "text": [""] * B , # a list of empty strings, one per batch element
+                    "mask": torch.ones((B, 1, 1, T), dtype=torch.bool, device=device),
+                }
+            }
+            for t in reversed(range(diffusion.num_timesteps)):
+                # Create a timestep tensor with shape (B,)
+                t_tensor = torch.full((B,), t, device=device, dtype=torch.long)
+                out = diffusion.p_sample(mdm_model, x, t_tensor, model_kwargs=model_kwargs)
+                x = out["sample"]
+            denoised_poses = out["pred_xstart"]
+        positions = recover_full_motion_from_data(denoised_poses, self.target_offset, t2m_raw_offsets, t2m_kinematic_chain, face_joint_indx, floor_height,root_pose_init_xz,root_quat_init)
+
+        # 1) back to SMPL coordinate frame
+        joints_smpl = to_smpl_frame(positions)            # torch (T,22,3)
+
+        # 2) inverse kinematics
+        glo, bpose, tra = joints_to_smpl_params(joints_smpl, bm)
+        # final_pose = preprocess_reverse_pose(positions, sample_id)
         # assert np.allclose(positions_np, final_pose, atol=1e-4)
-        return sample_id, feature, pose
+        return sample_id, feature, pose, glo, bpose, tra

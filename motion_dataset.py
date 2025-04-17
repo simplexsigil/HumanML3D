@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 from tqdm import tqdm
-import motion_representation
+from HumanML3D import motion_representation
 
 
 def swap_left_right(data):

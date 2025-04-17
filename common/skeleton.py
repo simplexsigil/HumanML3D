@@ -1,4 +1,4 @@
-from common.quaternion import *
+from HumanML3D.common.quaternion import *
 import scipy.ndimage.filters as filters
 
 
