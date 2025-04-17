@@ -17,6 +17,7 @@ from paramUtil import t2m_kinematic_chain, t2m_raw_offsets, joints_num
 from common.skeleton import Skeleton
 from amass_preprocessing import get_amass_paths, amass_to_pose, initialize_body_models
 from smplx.body_models import SMPLH
+from humanml_to_smpl_dataset import ConversionDataset
 
 
 def parse_arguments():
@@ -152,7 +153,7 @@ def process_and_generate_features(args):
     smpl_h.to(args.device)
 
     # Create dataset and DataLoader for parallel loading
-    dataset = MotionDataset(
+    dataset = ConversionDataset(
         data_type=args.data_type,
         input_dir=args.input_dir,
         dataset=args.dataset,
