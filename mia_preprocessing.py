@@ -17,6 +17,10 @@ from os.path import join as opj
 from smplx.body_models import SMPLH
 from scipy.spatial.transform import Rotation as R, Slerp
 
+DO_VISU=False
+
+if DO_VISU:
+    from visu_utils import visualize_motion_trimesh
 
 def axis_angle_to_quaternion(axis_angle):
     """Convert axis-angle to quaternion."""
@@ -153,8 +157,9 @@ def mia_to_smpl_body(pose_dir, bm, device=None):
     orig_rotation = pose_tensor[:, :3].cpu().numpy()  # Shape (30,3), axis angle representation
 
     # Rotation to be applied
-    rotation_matrix = np.array([[-1.0, 0.0, 0.0], [0.0, -1, 0], [0.0, 0, 1]])
-
+    # rotation_matrix = np.array([[-1.0, 0.0, 0.0], [0.0, -1, 0], [0.0, 0, 1]])
+    # rotation_matrix = np.array([[1.0, 0.0, 0.0], [0.0, 1, 0], [0.0, 0, 1]])
+    rotation_matrix = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
     # Convert axis-angle to rotation matrices
     orig_rot_matrices = R.from_rotvec(orig_rotation).as_matrix()  # Shape (30, 3, 3)
 
@@ -172,6 +177,22 @@ def mia_to_smpl_body(pose_dir, bm, device=None):
     left_hand_pose = torch.zeros((pose_tensor.shape[0], 45)).to(device)
     right_hand_pose = torch.zeros((pose_tensor.shape[0], 45)).to(device)
 
+    # Initial body for ground height computation
+    tmp_body = bm(
+        betas=betas_tensor,
+        body_pose=pose_tensor[:, 3:66],
+        left_hand_pose=left_hand_pose,
+        right_hand_pose=right_hand_pose,
+        global_orient=new_orientation,
+        transl=transl_tensor,
+    )
+
+    # Compute per-frame lowest vertex (Y axis is up)
+    verts_np = tmp_body.vertices.detach().cpu().numpy()
+    min_y = verts_np.min(axis=(1, 2))  # (N,)
+    transl_tensor[:, 1] -= torch.tensor(min_y).to(transl_tensor)
+
+    # Final body with ground-adjusted translation
     body = bm(
         betas=betas_tensor,
         body_pose=pose_tensor[:, 3:66],
@@ -180,6 +201,26 @@ def mia_to_smpl_body(pose_dir, bm, device=None):
         global_orient=new_orientation,
         transl=transl_tensor,
     )
+
+    # body = bm(
+    #    betas=betas_tensor,
+    #    body_pose=pose_tensor[:, 3:66],
+    #    left_hand_pose=left_hand_pose,
+    #    right_hand_pose=right_hand_pose,
+    #    global_orient=new_orientation,
+    #    transl=transl_tensor,
+    # )
+
+    if DO_VISU:
+        verts = body.vertices.detach().cpu().numpy()  # shape (N_frames, N_verts, 3)
+
+        visualize_motion_trimesh(
+            verts,
+            bm.faces,
+            title=str(os.path.split(pose_dir)[-1]),
+            fps=10,
+            # rot_matrix=rotation_matrix,
+        )
 
     return body
 
