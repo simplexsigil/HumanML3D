@@ -1,3 +1,7 @@
+*.png
+animation_frames
+HumanML3D
+amass_data
 # Python cache files
 __pycache__/
 **/__pycache__/

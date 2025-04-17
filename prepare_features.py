@@ -2,6 +2,16 @@
 import os
 import argparse
 import numpy as np
+
+os.environ["PYOPENGL_PLATFORM"] = "egl"
+np.bool = np.bool_
+np.int = np.int_
+np.float = np.float_
+np.complex = np.complex_
+np.object = np.object_
+np.unicode = np.unicode_
+np.str = np.str_
+
 from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
@@ -125,10 +135,11 @@ def process_and_generate_features(args):
         print("Loading reference sample for skeleton normalization...")
         reference_sample_path = args.skeleton_reference_path
         if args.data_type == "amass":
-            pose, _ = amass_to_pose(os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device)
+            pose, _ = amass_to_pose(
+                os.path.join(args.input_dir, reference_sample_path), male_bm, female_bm, args.device
+            )
         elif args.data_type == "mia":
             pose = mia_to_pose(os.path.join(args.input_dir, reference_sample_path), smpl_h, args.device)
-        
 
         rotate = isinstance(reference_sample_path, str) and ("humanact12" not in reference_sample_path)
 
@@ -140,7 +151,6 @@ def process_and_generate_features(args):
     except Exception as e:
         print(f"Error loading reference sample: {e}")
         raise
-
 
     # Create dataset and DataLoader for parallel loading
     dataset = MotionDataset(
@@ -161,7 +171,7 @@ def process_and_generate_features(args):
             # Process the raw pose using process_file outside the dataset.
             features_dict[sample] = feature
             poses_dict[sample] = pose
-            
+
     print(f"Generated features for {len(features_dict)} samples")
 
     # Step 3: Calculate mean and variance if requested

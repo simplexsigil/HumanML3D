@@ -7,7 +7,18 @@ from os.path import join as pjoin
 
 from common.skeleton import Skeleton
 from common.quaternion import *
-from paramUtil import t2m_raw_offsets, t2m_kinematic_chain, joints_num, l_idx1, l_idx2, fid_r, fid_l, face_joint_indx, r_hip, l_hip
+from paramUtil import (
+    t2m_raw_offsets,
+    t2m_kinematic_chain,
+    joints_num,
+    l_idx1,
+    l_idx2,
+    fid_r,
+    fid_l,
+    face_joint_indx,
+    r_hip,
+    l_hip,
+)
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -530,7 +541,3 @@ def recover_from_ric(data, joints_num):
 """
 Data Generation
 """
-
-
-
-

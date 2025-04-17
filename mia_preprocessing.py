@@ -105,7 +105,7 @@ def mia_to_smpl_body(pose_dir, bm, device=None):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     elif isinstance(device, str):
         device = torch.device(device)
-    
+
     pose_np = np.load(opj(pose_dir, "pose.npy"))
     betas_np = np.load(opj(pose_dir, "betas.npy"))
     predcam_np = np.load(opj(pose_dir, "predcam.npy"))
@@ -218,13 +218,13 @@ def swap_left_right(data):
 
 def process_mia_data(root_dir, output_dir=None, save_intermediate=False, device=None):
     """Process MIA data and return joint positions
-    
+
     Args:
         root_dir: Directory containing MIA data
         output_dir: Directory to save processed data (if save_intermediate is True)
         save_intermediate: Whether to save intermediate results to disk
         device: Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)
-    
+
     Returns:
         Dictionary mapping sample paths to joint position arrays
     """
@@ -232,51 +232,56 @@ def process_mia_data(root_dir, output_dir=None, save_intermediate=False, device=
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     elif isinstance(device, str):
         device = torch.device(device)
-    
+
     # Initialize the SMPL-H body model
     smpl_h_path = "./body_models/smpl/SMPLH_NEUTRAL_AMASS_MERGED.pkl"
     # Each sample in MIA has 30 frames at 10 fps. We convert to 20 fps by interpolating intermediate frames
     # Since we only interpolate between two frames we end up with 59 frames as result.
     bm = SMPLH(model_path=smpl_h_path, num_betas=10, use_pca=False, batch_size=59).to(device)
-    
+
     sample_dirs = get_leaf_directories(root_dir)
     results = {}
-    
+
     for path in tqdm(sample_dirs, desc="Processing MIA data"):
         if save_intermediate and output_dir:
             save_path = path.replace(root_dir, output_dir) + ".npy"
             # Create the directories if they do not exist
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        
+
         # Process the pose data with the specified device
         pose_seq_np = mia_to_pose(path, bm, device)
-        
+
         if save_intermediate and output_dir:
             np.save(save_path, pose_seq_np)
-        
+
         # Store result in memory
         results[path] = pose_seq_np
-        
+
         # Also generate mirrored version
         mirrored_data = swap_left_right(pose_seq_np)
         mirrored_key = f"M_{path}"
         results[mirrored_key] = mirrored_data
-        
+
         if save_intermediate and output_dir:
             mirrored_save_path = os.path.dirname(save_path) + "/M_" + os.path.basename(save_path)
             np.save(mirrored_save_path, mirrored_data)
-    
+
     return results
 
 
 if __name__ == "__main__":
     # This is only for standalone testing
     import argparse
+
     parser = argparse.ArgumentParser(description="Process MIA motion data")
     parser.add_argument("--input_dir", type=str, required=True, help="Directory containing MIA data")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save processed data")
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
-                        help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda" if torch.cuda.is_available() else "cpu",
+        help="Device to run computations on ('cuda', 'cuda:0', 'cpu', etc.)",
+    )
     args = parser.parse_args()
-    
+
     process_mia_data(args.input_dir, args.output_dir, save_intermediate=True, device=args.device)
