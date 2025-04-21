@@ -187,23 +187,26 @@ def joints_to_smpl_params(joints_smpl: torch.Tensor,
         # ---- variables to optimise ------------------------------------
         g = init_orient.clone().requires_grad_(True)
         p = init_pose  .clone().requires_grad_(True)
-        x = init_trans .clone().requires_grad_(True)
+        x = init_trans .clone().requires_grad_(True)    
 
         opt = torch.optim.Adam([g, p, x], lr=lr)
 
         for _ in range(n_iters):
             opt.zero_grad()
             out = body_model(global_orient=g, pose_body=p, transl=x)
-            loss = ((out.Jtr[0, :22] - target) ** 2).mean()
+            pose_reg = 1e-4 * p.pow(2).mean()
+            orient_reg = 1e-4 * g.pow(2).mean()
+            loss = ((out.Jtr[0, :22] - target) ** 2).mean() + pose_reg + orient_reg
             loss.backward()
             opt.step()
+        
 
         # keep solution & use it as warm start for next frame
         init_orient, init_pose, init_trans = g.detach(), p.detach(), x.detach()
         g_list.append(g.detach().cpu())
         p_list.append(p.detach().cpu())
         t_list.append(x.detach().cpu())
-
+        # print(f"Frame {t}, final loss: {loss.item():.6f}")
     return (torch.cat(g_list),    # (T,3)
             torch.cat(p_list),    # (T,63)
             torch.cat(t_list))    # (T,3)

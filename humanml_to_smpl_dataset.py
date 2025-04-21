@@ -152,6 +152,17 @@ class ConversionDataset(Dataset):
             feature, positions, global_positions, positions, l_velocity, floor_height, root_pose_init_xz, root_quat_init  = process_file(positions_np, self.target_offset, 0.002, self.device)
         else:
             feature = []
+        mean = np.mean(feature, axis=0)
+        std = np.std(feature, axis=0)
+        print("std min/max:", np.min(std), np.max(std))
+        print("Any zero?", np.any(std == 0))
+        print("Any NaN?", np.any(np.isnan(std)))
+
+        eps = 1e-6
+        std_safe = np.where(std < eps, 1.0, std)
+        feature_norm = (feature - mean) / std_safe
+        print("Feature stats:", np.mean(feature_norm), np.std(feature_norm))
+        print("Any NaN?", np.any(np.isnan(feature_norm)))
         device='cuda'
         mdm_ckpt_path = "/home/bkizilcelik/workspace/smpl-tools/mdm/save/humanml_enc_512_50steps/model000750000.pt"
         from mdm.model.mdm import MDM
@@ -176,7 +187,7 @@ class ConversionDataset(Dataset):
         mdm_model = load_saved_model(model=mdm_model, model_path=mdm_ckpt_path)
         mdm_model.to(device)
         mdm_model.eval()
-        poses_tensor = torch.tensor(feature)
+        poses_tensor = torch.tensor(feature_norm)
         poses_tensor = poses_tensor.transpose(0, 1).unsqueeze(0).unsqueeze(2)
         # Apply diffusion denoising.
         with torch.no_grad():
@@ -193,9 +204,29 @@ class ConversionDataset(Dataset):
                 t_tensor = torch.full((B,), t, device=device, dtype=torch.long)
                 out = diffusion.p_sample(mdm_model, x, t_tensor, model_kwargs=model_kwargs)
                 x = out["sample"]
-            denoised_poses = out["pred_xstart"]
-        positions = recover_full_motion_from_data(denoised_poses, self.target_offset, t2m_raw_offsets, t2m_kinematic_chain, face_joint_indx, floor_height,root_pose_init_xz,root_quat_init)
+            denoised_poses = out["pred_xstart"].squeeze().transpose(0, 1).to("cpu")
+            denoised = denoised_poses * std_safe + mean
+        positions = recover_full_motion_from_data(denoised, self.target_offset, t2m_raw_offsets, t2m_kinematic_chain, face_joint_indx, floor_height,root_pose_init_xz,root_quat_init)
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
 
+        def vis_joints(joints: np.ndarray, frame: int = 0):
+            # joints: (T, 22, 3)
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
+            j = joints[frame]
+            ax.scatter(j[:, 0], j[:, 1], j[:, 2], s=25)
+            ax.set_title(f'Frame {frame}')
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_zlabel('z')
+            plt.savefig(f"/home/bkizilcelik/workspace/smpl-tools/frame_{frame:04d}.png")
+            plt.close(fig)
+        for f in range(0, positions.shape[0], 10):  # save every 10th frame
+            vis_joints(positions, frame=f)
+
+        # vis_joints(positions, frame=0)
+        # original_positions = reverse_swap_left_right(positions)
         # 1) back to SMPL coordinate frame
         joints_smpl = to_smpl_frame(positions)            # torch (T,22,3)
 
